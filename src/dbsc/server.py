@@ -3,6 +3,7 @@
 import secrets
 import time
 from collections.abc import Callable
+from types import MappingProxyType
 from typing import Final
 
 from dbsc._json import constant_time_equals, dumps
@@ -33,7 +34,7 @@ _COOKIE_VALUE_BYTES: Final = 32
 _MAX_UPDATE_ATTEMPTS: Final = 3
 # Every response that carries session state (challenges, session ids, bound cookies, their
 # deletion) must never be stored by a shared cache and replayed to someone else.
-_NO_STORE: Final = {"Cache-Control": "no-store"}
+_NO_STORE: Final = MappingProxyType({"Cache-Control": "no-store"})
 
 
 class DbscServer:
@@ -195,7 +196,9 @@ class DbscServer:
         for _ in range(_MAX_UPDATE_ATTEMPTS):
             binding = await self._store.get_binding(ctx.session_id)
             if binding is None:
-                return DbscResponse(headers=_NO_STORE, status=403, content_type="application/json")
+                return DbscResponse(
+                    headers=dict(_NO_STORE), status=403, content_type="application/json"
+                )
             challenge = _nonce()
             rotated = binding.with_challenge(challenge, self._now())
             if await self._store.replace_binding(ctx.session_id, binding, rotated):
@@ -203,7 +206,9 @@ class DbscServer:
 
         binding = await self._store.get_binding(ctx.session_id)
         if binding is None:
-            return DbscResponse(headers=_NO_STORE, status=403, content_type="application/json")
+            return DbscResponse(
+                headers=dict(_NO_STORE), status=403, content_type="application/json"
+            )
         return _challenge_403(binding.session_identifier, binding.challenge)
 
     async def refresh(self, jwt: str, ctx: RequestContext) -> DbscResponse:
@@ -335,7 +340,9 @@ class DbscServer:
                 )
             else:
                 await self._audit.log(AuditEvent.REVOKED, "DBSC session revoked.", ctx.user_id)
-        return DbscResponse(headers=_NO_STORE, cookies=(Cookie.deletion(self._config.cookie_name),))
+        return DbscResponse(
+            headers=dict(_NO_STORE), cookies=(Cookie.deletion(self._config.cookie_name),)
+        )
 
     # --- Enforcement-gate primitives -------------------------------------------------------
     # The library deliberately does not run the gate itself: where you enforce depends on your

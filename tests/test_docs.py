@@ -13,7 +13,7 @@ import dbsc
 from dbsc import Config, DbscServer
 
 ROOT = Path(__file__).parent.parent
-README = (ROOT / "README.md").read_text()
+README = (ROOT / "README.md").read_text(encoding="utf-8")
 PYTHON_BLOCKS = [
     textwrap.dedent(block)
     for block in re.findall(r"```python\n(.*?)^ *```", README, re.DOTALL | re.MULTILINE)
@@ -58,7 +58,9 @@ def test_readme_config_table_covers_every_field() -> None:
 
 
 def test_changelog_documents_the_current_version() -> None:
-    version = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
-    changelog = (ROOT / "CHANGELOG.md").read_text()
+    version = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+        "version"
+    ]
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     assert f"## [{version}]" in changelog
     assert f"[{version}]: " in changelog, "comparison link at the bottom"

@@ -187,21 +187,26 @@ apply(await dbsc.revoke(ctx), response)
 The library exposes the primitives but does **not** run the gate itself, because *where* you enforce depends on your routing. The recommended policy (also in `examples/demo_server.py`):
 
 ```python
-try:
-    binding = await dbsc.get_binding(ctx)
-except CorruptStateError:
-    binding = None
-    ...  # present but unreadable: revoke + log the user out (fail closed)
+async def enforce_dbsc(ctx: RequestContext, response) -> bool:
+    """Run the gate. False means the session was terminated: log out and redirect to login."""
+    try:
+        binding = await dbsc.get_binding(ctx)
+    except CorruptStateError:
+        # Present but unreadable: fail closed. Never fall through to cookie auth.
+        apply(await dbsc.revoke(ctx, enforcement_terminated=True), response)
+        return False
 
-if binding is None:
-    # Never registered: unsupported browser, or not yet. Degrade to normal cookie auth.
-    # (Do NOT block here. This is what makes locking out a Firefox user impossible.)
-    ...
-else:
+    if binding is None:
+        # Never registered: unsupported browser, or not yet. Degrade to normal cookie auth.
+        # (Do NOT block here. This is what makes locking out a Firefox user impossible.)
+        return True
+
     must_check = dbsc.is_document_request(ctx) or not dbsc.is_within_registration_grace(binding)
     if must_check and not dbsc.bound_cookie_matches(binding, ctx):
-        # Bound session, bad/absent device cookie: revoke + log the user out, redirect to login.
+        # Bound session, bad/absent device cookie: revoke, then log the user out.
         apply(await dbsc.revoke(ctx, enforcement_terminated=True), response)
+        return False
+    return True
 ```
 
 Enforce on document loads **and** on subresources past the registration grace. Document-only enforcement would let a stolen cookie exfiltrate via XHR within the cookie lifetime. Skip the gate on the `/dbsc/*` endpoints themselves.

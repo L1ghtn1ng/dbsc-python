@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from dbsc import Config, DbscServer
+from dbsc import Binding, Config, CorruptStateError, DbscServer, RequestContext
 from examples.demo_server import DemoApp, FileStore, serve
 from tests.support import FakeDevice
 
@@ -182,3 +182,43 @@ def test_demo_store_refuses_a_shared_directory(tmp_path: Path) -> None:
     shared.chmod(0o777)
     with pytest.raises(SystemExit, match="mode 0700"):
         FileStore(shared)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "{not json",
+        "[]",
+        '{"v": "x"}',
+        '{"exp": 9999999999}',
+        '{"exp": "soon", "v": "x"}',
+        '{"exp": 9999999999, "v": 7}',
+        b"\xff\xfe",
+    ],
+)
+async def test_demo_store_fails_closed_on_a_corrupt_file(
+    tmp_path: Path, content: str | bytes
+) -> None:
+    store = FileStore(tmp_path)
+    server = DbscServer(Config(), store)
+    request = RequestContext("s", "u", "https://example.test")
+    await store.put_binding("s", Binding("u", "sid", "c", "pem", "ES256", "chal", 1, 1))
+    record = next(tmp_path.glob("*.json"))
+    if isinstance(content, bytes):
+        record.write_bytes(content)
+    else:
+        record.write_text(content, encoding="utf-8")
+
+    with pytest.raises(CorruptStateError):
+        await server.get_binding(request)
+    await server.revoke(request)  # a corrupt record must still be torn down
+    assert not record.exists()
+
+
+async def test_demo_store_read_never_deletes(tmp_path: Path) -> None:
+    """Reads run without the write lock, so they must not remove even an expired record."""
+    store = FileStore(tmp_path, session_ttl=-1)  # written already expired
+    await store.put_binding("s", Binding("u", "sid", "c", "pem", "ES256", "chal", 1, 1))
+    record = next(tmp_path.glob("*.json"))
+    assert await store.get_binding("s") is None
+    assert record.exists()

@@ -29,6 +29,7 @@ import os
 import secrets
 import signal
 import ssl
+import sys
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -74,8 +75,10 @@ class FileStore(Store):
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         # The records are session secrets. Refuse a directory someone else owns or can write to
         # (for example one pre-created in a shared temp dir to read or plant records).
+        # POSIX only: Windows has no uid or mode bits (it uses ACLs), and there the default store
+        # is a fresh per-user temp directory anyway.
         info = directory.stat()
-        if info.st_uid != os.geteuid() or info.st_mode & 0o077:
+        if sys.platform != "win32" and (info.st_uid != os.geteuid() or info.st_mode & 0o077):
             raise SystemExit(
                 f"Refusing store directory {directory}: must be owned by you, mode 0700."
             )
@@ -145,22 +148,34 @@ class FileStore(Store):
         return self._dir / f"{hashlib.sha256(key.encode()).hexdigest()}.json"
 
     def _read(self, key: str) -> str | None:
+        """The stored payload, or ``None`` if absent or expired.
+
+        A file that exists but can't be read as our envelope raises ``CorruptStateError`` (the
+        ``Store`` contract), so the gate fails closed and ``revoke()`` can still tear it down.
+        Expired files are left alone: this path runs without the write lock, so deleting here
+        could remove a fresh record written to the same path in the meantime. The next write
+        replaces an expired file, and ``delete()`` removes it.
+        """
         path = self._path(key)
         try:
-            envelope = json.loads(path.read_text())
+            envelope = json.loads(path.read_text(encoding="utf-8"))
         except FileNotFoundError:
             return None
-        # The envelope is ours; its payload "v" is what from_json() validates (and fails closed on).
-        if envelope["exp"] < time.time():
-            path.unlink(missing_ok=True)
-            return None
-        return envelope["v"]
+        except ValueError as e:  # malformed JSON or bad encoding
+            raise CorruptStateError(f"Unreadable store record: {e}") from None
+        expires = envelope.get("exp") if isinstance(envelope, dict) else None
+        value = envelope.get("v") if isinstance(envelope, dict) else None
+        if not isinstance(expires, int) or isinstance(expires, bool) or not isinstance(value, str):
+            raise CorruptStateError("Store record envelope has missing or wrong-typed fields")
+        return None if expires < time.time() else value
 
     def _write(self, key: str, value: str, ttl: int) -> None:
         # Write a uniquely named temp file, then rename it over the record: atomic, so a
         # concurrent reader never sees a half-written record, and concurrent writers (a refresh
         # racing a document load) never trip over each other's temp file.
-        with tempfile.NamedTemporaryFile("w", dir=self._dir, suffix=".tmp", delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", dir=self._dir, suffix=".tmp", delete=False
+        ) as tmp:
             tmp.write(json.dumps({"v": value, "exp": int(time.time()) + ttl}))
         Path(tmp.name).replace(self._path(key))
 
@@ -500,10 +515,14 @@ async def main() -> None:
         stop = asyncio.Event()
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, stop.set)
+            # Unsupported on Windows' event loop; there Ctrl-C raises KeyboardInterrupt instead,
+            # which still unwinds the temporary-directory cleanup.
+            with contextlib.suppress(NotImplementedError):
+                loop.add_signal_handler(sig, stop.set)
         async with server:
             await stop.wait()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    with contextlib.suppress(KeyboardInterrupt):
+        asyncio.run(main())

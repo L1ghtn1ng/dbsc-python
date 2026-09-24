@@ -299,3 +299,13 @@ async def test_malformed_jwts_are_audited(make_server: ServerFactory, device: Fa
     with pytest.raises(JwtInvalidError):
         await server.refresh("garbage", ctx(SID))
     assert audit.events[-1] == AuditEvent.REFRESH_FAILED
+
+
+async def test_response_headers_are_never_shared(server: DbscServer) -> None:
+    """Mutating one response's headers must not leak into any other response."""
+    first = await server.revoke(ctx(SID))
+    first.headers["X-Leak"] = "user-a"  # ty: ignore[invalid-assignment]
+    second = await server.issue_refresh_challenge(ctx("nobody"))
+    third = await server.revoke(ctx(SID))
+    assert "X-Leak" not in second.headers
+    assert "X-Leak" not in third.headers

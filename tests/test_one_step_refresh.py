@@ -40,29 +40,38 @@ async def test_advertise_delivers_the_seed_exactly_once(
     assert second.cookies == ()
 
 
+type Changes = Callable[[int], dict[str, object]]
+
+
 @pytest.mark.parametrize(
-    "make",
+    ("changes", "advertises"),
     [
-        pytest.param(
-            lambda now: Binding("u", "sid", "c", "pem", "ES256", "", now, now), id="empty"
-        ),
-        pytest.param(
-            lambda now: Binding("u", "sid", "c", "pem", "ES256", "seed", now - 100_000, now),
-            id="expired",
-        ),
-        pytest.param(
-            lambda now: Binding(
-                "u", "sid", "c", "pem", "ES256", "seed", now, now, has_refreshed=True
-            ),
-            id="already-refreshed",
-        ),
+        pytest.param(lambda _now: {}, True, id="control"),
+        pytest.param(lambda _now: {"challenge": ""}, False, id="empty"),
+        pytest.param(lambda now: {"challenge_time": now - 100_000}, False, id="expired"),
+        pytest.param(lambda _now: {"has_refreshed": True}, False, id="already-refreshed"),
+        pytest.param(lambda _now: {"challenge_advertised": True}, False, id="already-advertised"),
     ],
 )
 async def test_advertise_no_ops(
-    server: DbscServer, clock: FakeClock, make: Callable[[int], Binding]
+    server: DbscServer,
+    store: InMemoryStore,
+    clock: FakeClock,
+    changes: Changes,
+    advertises: bool,
 ) -> None:
-    response = await server.advertise_refresh_challenge(make(int(clock())), ctx("s"))
-    assert response == DbscResponse()
+    """Each guard alone stops the advertisement; the control shows the setup would advertise."""
+    now = int(clock())
+    seed = Binding("user-1", "sid", "c", "pem", "ES256", "seed", now, now)
+    binding = dataclasses.replace(seed, **changes(now))
+    await store.put_binding("s", binding)
+
+    response = await server.advertise_refresh_challenge(binding, ctx("s"))
+
+    assert ("Secure-Session-Challenge" in response.headers) is advertises
+    if not advertises:
+        assert response == DbscResponse()
+        assert await store.get_binding("s") == binding, "nothing written"
 
 
 async def test_refresh_accepts_the_advertised_then_rotated_challenge(
