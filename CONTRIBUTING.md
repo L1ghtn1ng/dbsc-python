@@ -46,14 +46,22 @@ uv run playwright install-deps chromium   # system libraries, if your distro lac
 uv run pytest -m e2e
 ```
 
-On Linux, Chromium only does DBSC with two feature switches (the tests pass them):
-`DeviceBoundSessions` and `EnableBoundSessionCredentialsSoftwareKeysForManualTesting`, which swaps
-the TPM for software keys. That second switch is a manual-testing aid and version-sensitive:
-Chrome for Testing 149 and Chromium 150 honour it, while Chromium 153 (Playwright's bundled
-build) silently ignores the registration header. That is why the suite uses a pinned Chrome for
-Testing build (`CHROME_VERSION` in `scripts/fetch_e2e_browser.py`) rather than
-`playwright install`. To move the pin, bump the version, run `pytest -m e2e` against it, and
-only merge if it passes.
+On Linux, Chromium only does DBSC with two `chrome://flags` settings, which the tests pass as
+command-line switches (`CHROMIUM_ARGS` in `tests/e2e/conftest.py`):
+
+- **Device Bound Session Credentials (Standard): Enabled - For developers.** On the command line
+  this is `DeviceBoundSessions` with parameters that lift newer Chrome's origin-trial requirement,
+  refresh quota and subdomain check.
+- **Device Bound Session Credentials with software keys**
+  (`EnableBoundSessionCredentialsSoftwareKeysForManualTesting`). This swaps the TPM for software
+  keys.
+
+The software-key switch is a manual-testing aid and version-sensitive. Chrome for Testing 149
+and Chromium 150 honour it. Every channel tested on 2026-09-24 silently ignores the registration
+header, even with both settings: Stable 154, Beta 155, Dev and Canary 156, and Playwright's
+bundled Chromium 153. That is why the suite uses a pinned Chrome for Testing build
+(`CHROME_VERSION` in `scripts/fetch_e2e_browser.py`) rather than `playwright install`. To move
+the pin, bump the version, run `pytest -m e2e` against it, and only merge if it passes.
 
 Things to keep in mind when writing e2e tests:
 

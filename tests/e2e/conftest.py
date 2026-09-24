@@ -19,10 +19,15 @@ from dbsc import Config, DbscServer, ScopeRule
 from examples.demo_server import DemoApp, FileStore, Request, Response, serve
 from tests.support import RecordingAuditLogger
 
-# Both are required: DBSC for websites, plus mock (software) keys since Linux has no TPM
-# provider. Neither alone makes Chromium register.
+# What chrome://flags sets for "Device Bound Session Credentials (Standard): Enabled - For
+# developers" plus "Device Bound Session Credentials with software keys" (Linux has no TPM
+# provider). The developer parameters lift newer Chrome's origin-trial requirement, refresh quota
+# and subdomain check; older builds ignore parameters they don't know. See
+# scripts/fetch_e2e_browser.py for which versions actually register.
 CHROMIUM_ARGS = [
-    "--enable-features=DeviceBoundSessions,EnableBoundSessionCredentialsSoftwareKeysForManualTesting",
+    "--enable-features=DeviceBoundSessions:RequireOriginTrialTokens/false/RefreshQuota/false/"
+    "CheckSubdomainRegistration/false/OriginTrialFeedback/true/SchemaVersion/2,"
+    "EnableBoundSessionCredentialsSoftwareKeysForManualTesting",
 ]
 BOUND_COOKIE = "__Host-e2e_dbsc"
 SESSION_COOKIE = "demo_session"
