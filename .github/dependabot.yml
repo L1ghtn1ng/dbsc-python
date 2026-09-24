@@ -6,11 +6,14 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
 
-  # Dev/test only — the library itself has zero runtime Composer dependencies, so
-  # this mostly tracks tooling if any is added later.
-  - package-ecosystem: composer
+  # The one runtime dependency (cryptography) plus the dev tooling, tracked via uv.lock.
+  - package-ecosystem: uv
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7

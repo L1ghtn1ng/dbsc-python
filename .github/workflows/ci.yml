@@ -3,45 +3,105 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [master]
+    branches: [main]
+  schedule:
+    # Weekly, so newly published advisories against the locked dependencies surface even when
+    # nothing is being merged.
+    - cron: '17 6 * * 1'
 
-# Least privilege: the test job only needs to read the checked-out code. The default
-# GITHUB_TOKEN is dropped to read-only so a compromised action can't push or open PRs.
+# Least privilege: every job here only reads the checked-out code. The default GITHUB_TOKEN is
+# read-only, so a compromised step can't push, open PRs or touch releases.
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Supply chain: every action is pinned to a full commit SHA (tags can be moved), with the
+# release it came from in a comment. Dependabot (.github/dependabot.yml) proposes updates.
+# Checkouts don't persist the token in .git/config, so later steps can't reuse it.
+
 jobs:
   build:
-    name: php-${{ matrix.php }}
+    name: python-${{ matrix.python }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        # Test the floor (composer.json requires >=8.1) and current stable.
-        php: ['8.1', '8.2', '8.3', '8.4']
+        # pyproject.toml requires >=3.14; extend as new versions ship.
+        python: ['3.14']
     steps:
-      # Action versions are pinned to major tags and tracked by Dependabot
-      # (.github/dependabot.yml), which raises PRs to bump them to exact SHAs.
-      - uses: actions/checkout@v7
-      - uses: shivammathur/setup-php@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          php-version: ${{ matrix.php }}
-          extensions: openssl, json
-          coverage: none
-          tools: none
-      - name: Lint sources
-        run: |
-          find src -name '*.php' -print0 | xargs -0 -n1 -P4 php -l
-          php -l _test/run-tests.php
-          php -l _test/server.php
-      - name: Run test harness
-        run: php _test/run-tests.php
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        run: uv sync --locked
+      - name: Lint
+        run: uv run ruff check --output-format=github
+      - name: Format
+        run: uv run ruff format --check
+      - name: Type-check
+        run: uv run ty check --output-format=github
+      - name: Test
+        run: uv run pytest
+      - name: Build
+        run: uv build
 
-  # Stable aggregate check used as the required status check on the `master`
-  # ruleset — its name does not change when the PHP matrix does.
+  # Known vulnerabilities in any locked dependency (runtime and dev) fail the build. Fix by
+  # upgrading; only ignore an advisory with a documented reason.
+  audit:
+    name: dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: '3.14'
+      - name: Audit locked dependencies (OSV)
+        run: uv audit --locked --preview-features audit-command
+
+  # The full DBSC lifecycle against a real headless Chromium, driven by Playwright.
+  # The browser is a pinned Chrome for Testing build: DBSC on Linux relies on a
+  # software-key testing switch that newer Chromium ignores (see the script's docstring).
+  e2e:
+    name: e2e (headless Chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: '3.14'
+      - name: Install
+        run: uv sync --locked
+      - name: Cache pinned browser
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/e2e-browser
+          key: e2e-browser-${{ runner.os }}-${{ hashFiles('scripts/fetch_e2e_browser.py') }}
+      - name: Fetch pinned browser
+        run: echo "DBSC_E2E_BROWSER=$(uv run python scripts/fetch_e2e_browser.py)" >> "$GITHUB_ENV"
+      - name: Install browser system libraries
+        run: uv run playwright install-deps chromium
+      - name: E2E tests
+        run: uv run pytest -m e2e
+
+  # Stable aggregate check used as the required status check on the `main`
+  # ruleset. Its name does not change when the jobs above do.
   test:
     name: test
-    needs: build
+    needs: [build, audit, e2e]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - run: echo "All PHP versions passed."
+      - run: echo "All checks passed."
