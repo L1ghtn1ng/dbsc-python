@@ -6,7 +6,7 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Report URI" }]
-maintainers = [{ name = "L1ghtn1ng" }]
+maintainers = [{ name = "Jay Townsend" }]
 requires-python = ">=3.14"
 keywords = [
     "dbsc",
