@@ -58,7 +58,12 @@ def fetch(dest: Path) -> Path:
             raise SystemExit(f"Download did not contain {binary.relative_to(root)}")
 
     for old in dest.iterdir():
-        if old.is_dir() and old.name != CHROME_VERSION and _VERSION.fullmatch(old.name):
+        if (
+            old.is_dir()
+            and not old.is_symlink()
+            and old.name != CHROME_VERSION
+            and _VERSION.fullmatch(old.name)
+        ):
             shutil.rmtree(old)
     return binary
 
