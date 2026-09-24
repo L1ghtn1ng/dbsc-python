@@ -7,7 +7,7 @@ versions may contain breaking changes; they will always be called out here.
 
 ## [Unreleased]
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-09-24
 
 First release: a Python port of [report-uri/dbsc-php](https://github.com/report-uri/dbsc-php)
 with the same wire behaviour.
