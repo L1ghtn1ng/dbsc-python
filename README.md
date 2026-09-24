@@ -405,4 +405,4 @@ Baked into this library from integration testing against real Chrome. Change wit
 
 ## License
 
-MIT (see [LICENSE](https://github.com/L1ghtn1ng/dbsc-python/blob/main/LICENSE)). © 2026 Report-URI Ltd. (the original [dbsc-php](https://github.com/report-uri/dbsc-php)) and © 2026 L1ghtn1ng (this Python port).
+MIT (see [LICENSE](https://github.com/L1ghtn1ng/dbsc-python/blob/main/LICENSE)). © 2026 Report-URI Ltd. (the original [dbsc-php](https://github.com/report-uri/dbsc-php)) and © 2026 Jay Townsend (this Python port).
