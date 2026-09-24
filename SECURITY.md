@@ -60,7 +60,7 @@ below.
 | **A03 Software Supply Chain Failures** | One runtime dependency (`cryptography`). All dependencies are locked with hashes (`uv.lock`) and installed with `--locked`. `uv audit` checks them against OSV on every PR and weekly. CI actions are pinned to commit SHAs and don't persist credentials. CodeQL scans the Python code and the workflows. Releases go out only through PyPI Trusted Publishing, with PEP 740 attestations and no stored API token. |
 | **A04 Cryptographic Failures** | ES256 only, verified by `cryptography` (OpenSSL): `alg` is pinned, JWK points are validated on-curve, and signatures must be raw 64-byte `r‖s`. Tokens with a `crit` header are refused. Nonces, challenges, session ids and cookie values are 256-bit `secrets` values. Every secret comparison is constant-time. |
 | **A05 Injection** | Values that reach response headers or cookies are validated: config paths and names at startup, stored identifiers and cookie values when a record is decoded. Everything else goes into the session instructions through `json.dumps`. The library builds no SQL, shell or HTML. |
-| **A06 Insecure Design** | Every state change is a conditional write (`commit_registration`, `replace_binding`), so concurrent requests can't undo each other: a refresh racing a page load, a 403 or a logout, or two registrations racing on one offer. Registration offers are consumed only by a successful registration, so junk attempts can't burn the offer and keep a session on cookie auth. |
+| **A06 Insecure Design** | Every state change is an atomic conditional write (`commit_registration`, `replace_binding`). There's no non-atomic fallback: a store that doesn't implement both can't be instantiated. So concurrent requests can't undo each other: a refresh racing a page load, a 403 or a logout, or two registrations racing on one offer. Registration offers are consumed only by a successful registration, so junk attempts can't burn the offer and keep a session on cookie auth. |
 | **A07 Authentication Failures** | The replay defence is a single-use challenge inside a device-signed JWT. A spent challenge is dropped on success, and the challenge overlap is single-depth and TTL-bounded. There's a session-fixation defence (see A01), and the reference server rotates its session id at login. |
 | **A08 Software or Data Integrity Failures** | Stored records are strictly typed and format-checked on decode. JSON with duplicate member names is refused, in tokens and in stored records. Unreadable state raises `CorruptStateError` and fails closed; it never degrades to cookie auth. |
 | **A09 Security Logging and Alerting Failures** | Every transition, including malformed tokens, is reported to the `AuditLogger`. Benign races log `dbscRefreshRetryable`, so `dbscRefreshFailed` and `dbscEnforcementTerminated` stay clean alerting signals. |
@@ -76,7 +76,7 @@ The library can't enforce these; your application must:
   header.
 - **Back `Store` with a dedicated, shared key space** (not the session blob), and
   implement `commit_registration` and `replace_binding` atomically in your backend.
-  The inherited defaults are single-process only.
+  There are no defaults: a store missing either can't be instantiated.
 - **Run the enforcement gate** on document loads and on subresources past the
   registration grace. **On a terminal refresh failure, revoke and end the session
   server-side.**

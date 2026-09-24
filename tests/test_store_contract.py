@@ -21,7 +21,11 @@ B2 = dataclasses.replace(B0, challenge_advertised=True)
 
 
 class DictStore(Store):
-    """Implements only the six required methods, so it runs the inherited default."""
+    """A minimal custom store over plain dicts.
+
+    Its conditional writes are atomic the simplest correct way: the check and the write run with
+    no ``await`` in between, so nothing can interleave on the event loop.
+    """
 
     def __init__(self) -> None:
         self.bindings: dict[str, str] = {}
@@ -54,11 +58,30 @@ class DictStore(Store):
         self.bindings.pop(session_id, None)
         self.pending.pop(session_id, None)
 
+    @override
+    async def commit_registration(
+        self, session_id: str, offer: PendingRegistration, binding: Binding
+    ) -> bool:
+        raw = self.pending.get(session_id)
+        if raw is None or PendingRegistration.from_json(raw) != offer:
+            return False
+        del self.pending[session_id]
+        self.bindings[session_id] = binding.to_json()
+        return True
+
+    @override
+    async def replace_binding(self, session_id: str, expected: Binding, new: Binding) -> bool:
+        raw = self.bindings.get(session_id)
+        if raw is None or Binding.from_json(raw) != expected:
+            return False
+        self.bindings[session_id] = new.to_json()
+        return True
+
 
 STORES: dict[str, Callable[[Path], Store]] = {
     "in-memory": lambda _: InMemoryStore(),
     "file (demo)": FileStore,
-    "inherited default": lambda _: DictStore(),
+    "minimal custom": lambda _: DictStore(),
 }
 
 
@@ -114,7 +137,7 @@ async def test_in_memory_refuses_an_expired_record() -> None:
     assert await store.get_binding("s") is None
 
 
-async def test_default_fails_closed_on_corrupt_state() -> None:
+async def test_replace_fails_closed_on_corrupt_state() -> None:
     store = DictStore()
     store.bindings["s"] = "garbage"
     with pytest.raises(CorruptStateError):
@@ -171,9 +194,53 @@ async def test_in_memory_commit_refuses_an_expired_offer() -> None:
     assert await store.commit_registration("s", OFFER, B0) is False
 
 
-async def test_default_commit_fails_closed_on_corrupt_state() -> None:
+async def test_commit_fails_closed_on_corrupt_state() -> None:
     store = DictStore()
     store.pending["s"] = "garbage"
     with pytest.raises(CorruptStateError):
         await store.commit_registration("s", OFFER, B0)
     assert "s" not in store.bindings
+
+
+async def test_concurrent_replaces_succeed_once(store: Store) -> None:
+    await store.put_binding("s", B0)
+    candidates = [dataclasses.replace(B0, cookie_value=f"rotated-{i}") for i in range(8)]
+    results = await asyncio.gather(*(store.replace_binding("s", B0, b) for b in candidates))
+    assert results.count(True) == 1
+    assert await store.get_binding("s") == candidates[results.index(True)]
+
+
+class IncompleteStore(Store):
+    """Implements everything except the two atomic conditional writes."""
+
+    @override
+    async def put_pending_registration(self, session_id: str, pending: PendingRegistration) -> None:
+        pass
+
+    @override
+    async def get_pending_registration(self, session_id: str) -> PendingRegistration | None:
+        return None
+
+    @override
+    async def delete_pending_registration(self, session_id: str) -> None:
+        pass
+
+    @override
+    async def put_binding(self, session_id: str, binding: Binding) -> None:
+        pass
+
+    @override
+    async def get_binding(self, session_id: str) -> Binding | None:
+        return None
+
+    @override
+    async def delete(self, session_id: str) -> None:
+        pass
+
+
+def test_a_store_without_atomic_writes_is_refused() -> None:
+    """No silent non-atomic fallback: an incomplete store fails at construction, i.e. startup."""
+    with pytest.raises(TypeError) as refused:
+        IncompleteStore()  # ty: ignore[call-non-callable]
+    assert "commit_registration" in str(refused.value)
+    assert "replace_binding" in str(refused.value)

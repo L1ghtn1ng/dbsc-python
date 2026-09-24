@@ -1,6 +1,7 @@
 """Persistence for DBSC state."""
 
 import time
+from abc import abstractmethod
 from collections.abc import Callable
 from typing import Protocol, override
 
@@ -10,6 +11,11 @@ from dbsc.pending import PendingRegistration
 
 class Store(Protocol):
     """Persistence for DBSC state, keyed by the host application's session id.
+
+    Every method is abstract: a subclass that leaves any of them out raises ``TypeError`` when
+    instantiated, so an incomplete store fails at startup rather than in production. There are
+    deliberately no default implementations, because the two conditional writes can only be made
+    atomic with the backend's own primitive.
 
     Implementation requirements:
 
@@ -26,93 +32,75 @@ class Store(Protocol):
       already does this; call it only for a record that exists). Returning ``None`` for corrupt
       data would degrade a bound session to plain cookie auth, the fail-open DBSC exists to
       prevent.
-    - :meth:`commit_registration` SHOULD be atomic: it consumes the registration offer and creates
-      the binding in one step, and only if that exact offer is still stored. Otherwise two
-      registrations racing on one offer both bind (the second silently replacing the first), and a
-      logout landing mid-registration leaves a binding behind for a logged-out session. Redis
-      ``WATCH``/``MULTI`` or a SQL transaction do this.
-    - :meth:`replace_binding` SHOULD be atomic. The server updates a binding by reading it,
-      deriving a new one and writing it back conditionally; the condition is what stops a
-      concurrent write (a refresh racing a page load, a logout racing a refresh) from being
-      silently undone. The inherited default is a check-then-write: fine for a single-process
-      store with no awaits in between, but it leaves a small window elsewhere. Override it with
-      your backend's primitive (Redis ``WATCH``/``MULTI``, SQL ``UPDATE ... WHERE``, a row lock).
-
-    Subclass :class:`Store` explicitly so you inherit those defaults until you override them.
+    - :meth:`commit_registration` and :meth:`replace_binding` MUST be atomic: the check and the
+      write happen as one indivisible operation against the backend (Redis ``WATCH``/``MULTI``, a
+      SQL transaction or ``UPDATE ... WHERE``, a row lock). A check-then-write split across
+      ``await`` points is NOT atomic, even in a single process: two concurrent callers can both
+      pass the check and both report success. That lets one registration offer bind twice, and
+      a stale write undo a refresh's cookie rotation (logging a legitimate user out) or bring
+      back a session that was just revoked.
     """
 
+    @abstractmethod
     async def put_pending_registration(self, session_id: str, pending: PendingRegistration) -> None:
         """Store the registration offer, expiring on the challenge TTL."""
-        ...
 
+    @abstractmethod
     async def get_pending_registration(self, session_id: str) -> PendingRegistration | None:
         """The pending registration, or ``None`` if absent.
 
         Raises:
             CorruptStateError: a record exists but is unreadable.
         """
-        ...
 
+    @abstractmethod
     async def delete_pending_registration(self, session_id: str) -> None:
-        """Remove the pending registration (it is single-use). A no-op if absent."""
-        ...
+        """Remove the pending registration. A no-op if absent."""
 
+    @abstractmethod
     async def put_binding(self, session_id: str, binding: Binding) -> None:
         """Store the binding, expiring with the authenticated session lifetime."""
-        ...
 
+    @abstractmethod
     async def get_binding(self, session_id: str) -> Binding | None:
         """The binding, or ``None`` ONLY if no record exists.
 
         Raises:
             CorruptStateError: a record exists but is unreadable. Never return ``None`` for it.
         """
-        ...
 
+    @abstractmethod
     async def delete(self, session_id: str) -> None:
         """Remove both the binding and any pending registration. A no-op if absent."""
-        ...
 
+    @abstractmethod
     async def commit_registration(
         self, session_id: str, offer: PendingRegistration, binding: Binding
     ) -> bool:
-        """Consume ``offer`` and store ``binding``, only if ``offer`` is still the stored offer.
+        """Atomically consume ``offer`` and store ``binding``, only if ``offer`` is still stored.
 
         Returns ``False``, changing nothing, if the stored offer differs or is gone: it was used by
         a concurrent registration, withdrawn by :meth:`delete` (logout), or replaced by a newer
         offer. Compare decoded records (``PendingRegistration`` equality), not raw JSON. The
-        binding expires like :meth:`put_binding`.
-
-        This default is a non-atomic check-then-write; override it atomically (see the class
-        docstring).
+        binding expires like :meth:`put_binding`. MUST be atomic (see the class docstring).
 
         Raises:
             CorruptStateError: the stored offer exists but is unreadable.
         """
-        if await self.get_pending_registration(session_id) != offer:
-            return False
-        await self.delete_pending_registration(session_id)
-        await self.put_binding(session_id, binding)
-        return True
 
+    @abstractmethod
     async def replace_binding(self, session_id: str, expected: Binding, new: Binding) -> bool:
-        """Write ``new`` only if the stored binding still equals ``expected`` (compare-and-set).
+        """Atomically write ``new`` only if the stored binding still equals ``expected``.
 
         Returns ``False``, writing nothing, if the stored binding differs or no longer exists:
         someone else updated or revoked it since ``expected`` was read. Compare the decoded
         records (``Binding`` equality), not raw JSON, so records written by another library
         version with different formatting still compare equal. Expires like :meth:`put_binding`.
-
-        This default is a non-atomic check-then-write; override it atomically (see the class
-        docstring).
+        MUST be atomic (see the class docstring).
 
         Raises:
             CorruptStateError: the stored record exists but is unreadable.
         """
-        if await self.get_binding(session_id) != expected:
-            return False
-        await self.put_binding(session_id, new)
-        return True
 
 
 class InMemoryStore(Store):

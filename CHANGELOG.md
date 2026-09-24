@@ -31,8 +31,9 @@ with the same wire behaviour.
   each other: a refresh racing a page load, a reactive 403 or a logout; two refreshes proving the
   same challenge; two registrations on one offer; or a logout or re-login mid-registration.
   Failed registration attempts no longer consume the offer, so junk attempts can't keep a session
-  on plain cookie auth. `Store` subclasses inherit single-process defaults for both; `InMemoryStore`
-  implements them atomically. dbsc-php has these races; the stored JSON format is unchanged.
+  on plain cookie auth. Both must be atomic in the backend, so there are no defaults: every `Store`
+  method is abstract, and a store missing one fails at construction. `InMemoryStore` implements
+  them atomically. dbsc-php has these races; the stored JSON format is unchanged.
 - Security hardening mapped to the OWASP Top 10:2025 (see SECURITY.md):
   - Session-fixation defence: a binding recorded for one user is refused for another, on the
     gate, on refresh and on registration.

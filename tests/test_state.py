@@ -160,6 +160,18 @@ class CorruptStore(Store):
     async def delete(self, session_id: str) -> None:
         self.deleted = True
 
+    @override
+    async def commit_registration(
+        self, session_id: str, offer: PendingRegistration, binding: Binding
+    ) -> bool:
+        PendingRegistration.from_json("garbage")
+        return False
+
+    @override
+    async def replace_binding(self, session_id: str, expected: Binding, new: Binding) -> bool:
+        Binding.from_json("garbage")
+        return False
+
 
 async def test_corrupt_binding_fails_closed() -> None:
     store = CorruptStore()

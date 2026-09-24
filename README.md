@@ -297,7 +297,7 @@ The rules any store must follow:
   - `commit_registration(session_id, offer, binding)` consumes the registration offer and stores the binding in one step, and only if that exact offer is still stored. Registration only consumes the offer when it succeeds, so junk attempts can't use it up. A logout or newer login that lands mid-registration wins, and so does the first of two registrations racing on one offer. Without atomicity, both racing registrations bind (the second silently replacing the first), or a binding appears for a session that just logged out. Redis `WATCH`/`MULTI` does this, as above; in SQL, a transaction that deletes the offer row (checking it's unchanged) and inserts the binding.
   - `replace_binding(session_id, expected, new)` writes `new` only if the stored binding still equals `expected`, and returns `False` otherwise, including when the record is gone. Compare the decoded `Binding`s, not raw JSON. Otherwise a stale write can undo a cookie rotation, which logs a legitimate user out, or bring back a session that was just revoked. Redis `WATCH`/`MULTI` does this, as above; in SQL, an `UPDATE ... WHERE` on the old value, or a row lock.
 
-  Subclass `Store` and you inherit defaults for both, built from the other methods. They're only safe within a single process, so override them for anything shared.
+  There are deliberately no default implementations: a check-then-write split across `await`s isn't atomic, even in one process, since two concurrent callers can both pass the check. Every `Store` method is abstract, so a subclass missing either of these raises `TypeError` when created, at startup rather than in production.
 
 ## Audit logging
 
