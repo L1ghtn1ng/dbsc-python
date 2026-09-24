@@ -1,4 +1,6 @@
 .gitattributes export-ignore
 .github/ export-ignore
 .gitignore export-ignore
-_test/ export-ignore
+.python-version export-ignore
+examples/ export-ignore
+tests/ export-ignore

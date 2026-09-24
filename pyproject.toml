@@ -1,0 +1,102 @@
+[project]
+name = "dbsc"
+version = "0.1.0"
+description = "A small, framework-agnostic, async Python server library for Device Bound Session Credentials (DBSC)"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Report URI" }]
+maintainers = [{ name = "L1ghtn1ng" }]
+requires-python = ">=3.14"
+keywords = [
+    "dbsc",
+    "device-bound-session-credentials",
+    "session",
+    "authentication",
+    "security",
+    "cookie-theft",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Internet :: WWW/HTTP :: Session",
+    "Topic :: Security",
+    "Typing :: Typed",
+]
+# The one runtime dependency: the stdlib has no elliptic-curve crypto, and ES256 verification must
+# not be hand-rolled. Everything else (JSON, base64, nonces, constant-time compare) is stdlib.
+dependencies = ["cryptography>=46"]
+
+[project.urls]
+Homepage = "https://github.com/L1ghtn1ng/dbsc-python"
+Issues = "https://github.com/L1ghtn1ng/dbsc-python/issues"
+Source = "https://github.com/L1ghtn1ng/dbsc-python"
+Documentation = "https://github.com/L1ghtn1ng/dbsc-python#readme"
+Changelog = "https://github.com/L1ghtn1ng/dbsc-python/blob/main/CHANGELOG.md"
+Security = "https://github.com/L1ghtn1ng/dbsc-python/security/policy"
+
+[dependency-groups]
+dev = [
+    "playwright>=1.63",
+    "pytest>=9.1",
+    "pytest-asyncio>=1.4",
+    "ruff>=0.16",
+    "ty>=0.0.83",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.18,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "dbsc"
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F", "I", "N", "UP", "B", "A", "C4", "SIM", "RET", "PIE", "PT", "RUF",
+    "S", "ASYNC", "TRY", "PERF", "FBT", "PL", "DTZ", "ARG", "FURB", "LOG", "G",
+    "D1",  # every public module, class and function in the library is documented
+]
+ignore = [
+    "D105",     # dunder methods (__post_init__ validation) are covered by the class docstring
+    "PLR0913",  # the Binding record and a few constructors mirror the wire/storage shape
+    "PLR2004",  # magic values: byte lengths are documented at the call site
+    "TRY003",   # exception messages are the audit trail; keep them at the raise site
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "PLR2004", "FBT", "D1"]
+"examples/**" = ["S104", "T201", "D1"]
+"scripts/**" = ["T201"]
+
+[tool.ruff.format]
+quote-style = "double"
+docstring-code-format = true
+
+[tool.ty.environment]
+python-version = "3.14"
+
+[tool.ty.src]
+include = ["src", "tests", "examples", "scripts"]
+
+[tool.ty.rules]
+possibly-unresolved-reference = "error"
+
+[tool.pytest]
+minversion = "9.0"
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers", "--strict-config"]
+xfail_strict = true
+filterwarnings = ["error"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = ["e2e: drives a real headless Chromium; needs DBSC_E2E_BROWSER (skipped otherwise)"]
